@@ -3,7 +3,7 @@ import os
 import logging
 from joblib import Parallel, delayed, parallel_backend
 import pysam
-from .scoring import score_geno, impute_score_ref
+from .scoring import score_geno, impute_score_ref, impute_score_wildtype
 from .variant_processing import fetch_variant, geno_to_df
 
 
@@ -42,7 +42,7 @@ def process_batch(batch, bcf_files, samples, col, impute, refbcf):
                         f"{variant['position']}..."
                     )
                     batch_results.append(
-                        impute_score_ref(
+                        impute_score_wildtype(
                             samples, variant, refbcf))
                     imputed += 1
                 else:
