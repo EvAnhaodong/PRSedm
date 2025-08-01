@@ -36,6 +36,7 @@ def score_geno(geno_df, variant_row, mode):
 
     scores = beta * (dosage if effect_allele == ref else 2 - dosage)
     scores[np.isnan(scores)] = 0
+    print(f"variant_row: {variant_row}, scores: {scores}, geno_df: {geno_df}")
     return pd.DataFrame({var: scores}, index=geno_df.columns[9:])
 
 
@@ -86,3 +87,34 @@ def impute_score_ref(samples, r, refbcf):
     af = 1 - af if r['effect_allele'] == ref else af
     return pd.DataFrame({f"{r['contig_id']}:{r['position']}_imputed": [
                         r['beta'] * af * (2 - af)]}, index=samples)
+
+def impute_score_wildtype(samples, r, ref):
+    import pandas as pd
+    import pysam
+    """从参考基因组获取野生型基因型进行imputation打分"""
+    # 打开参考基因组文件
+    with pysam.FastaFile(ref) as fasta:
+        try:
+            # 获取该位点的参考基因组碱基
+            wildtype = fasta.fetch(r['contig_id'], r['position']-1, r['position'])
+        except KeyError:
+            # 处理染色体命名不一致的情况
+            chrom = r['contig_id'].replace('chr', '')
+            try:
+                wildtype = fasta.fetch(chrom, r['position']-1, r['position'])
+            except KeyError:
+                raise ValueError(f"无法在参考基因组中找到位点 {r['contig_id']}:{r['position']}")
+
+    # 判断effect_allele是否为野生型
+    is_effect_wildtype = (r['effect_allele'].upper() == wildtype.upper())
+
+    # 计算得分
+    # 如果effect_allele是野生型,则基因型0/0对应剂量为2
+    # 如果effect_allele不是野生型,则基因型0/0对应剂量为0
+    dosage = 2 if is_effect_wildtype else 0
+    score = r['beta'] * dosage
+    print(f"effect_allele: {r['effect_allele']}, wildtype: {wildtype}, is_effect_wildtype: {is_effect_wildtype}, dosage: {dosage}, score: {score}")
+    # 返回与原函数相同格式的DataFrame
+    return pd.DataFrame({
+        f"{r['contig_id']}:{r['position']}_ref": [score]
+    }, index=samples)
