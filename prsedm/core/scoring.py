@@ -4,6 +4,25 @@ import numpy as np
 from .variant_processing import fetch_variant, geno_to_df, get_af_rec
 
 
+def trim_alleles(ref, alt):
+    """Left-align alleles by trimming common suffix first, then prefix"""
+    # Remove common suffix (从右往左判断)
+    while len(ref) > 1 and len(alt) > 1 and ref[-1] == alt[-1]:
+        ref = ref[:-1]
+        alt = alt[:-1]
+    return alt
+
+def normalize_variant(ref, used_alleles_list, effect_allele):
+    """Normalize variant and calculate dosage based on effect_allele"""
+    # 统计effect_allele在used_alleles_list中的出现次数
+    dosage = 0
+    for allele in used_alleles_list:
+        # 对所有等位基因进行标准化处理（包括REF和ALT相同的情况）
+        norm_allele = trim_alleles(ref, allele)
+        if norm_allele[0] == effect_allele:
+            dosage += 1
+    return dosage
+
 def score_geno(geno_df, variant_row, mode):
     contig_id = variant_row["contig_id"]
     var = f"{contig_id}:{variant_row['position']}"
@@ -12,12 +31,26 @@ def score_geno(geno_df, variant_row, mode):
     sample_data = geno_df.iloc[0, 9:].to_numpy(str)
 
     if mode == "GT" and "GT" in geno_col_map:
+        alleles = [ref] + (geno_df['ALT'].iloc[0].split(',') if pd.notna(geno_df['ALT'].iloc[0]) else [])
+
         gt_data = np.array([entry.split(":")[geno_col_map["GT"]]
                            for entry in sample_data])
         # Normalize genotype separators
         gt_data = np.char.replace(gt_data, "|", "/")
-        dosage = np.where(gt_data == "0/0", 2, np.where(gt_data == "1/1", 0,
-                          np.where(np.isin(gt_data, ["0/1", "1/0"]), 1, np.nan))).astype(float)
+
+        # 对每个基因型单独计算dosage和score
+        scores = np.zeros(len(gt_data))
+        for i, gt in enumerate(gt_data):
+            current_alleles = []
+            for allele_idx in gt.split('/'):
+                if allele_idx.isdigit():
+                    idx = int(allele_idx)
+                    current_alleles.append(alleles[idx])
+            # 对当前基因型计算dosage
+            current_dosage = normalize_variant(ref, current_alleles, effect_allele)
+            print(gt, ref, current_alleles, effect_allele)
+            # 计算当前基因型的score
+            scores[i] = beta * current_dosage
     elif mode == "GP" and "GP" in geno_col_map:
         gp_data = np.array([
             entry.split(":")[geno_col_map["GP"]]
@@ -30,11 +63,11 @@ def score_geno(geno_df, variant_row, mode):
             raise ValueError(
                 "Invalid GP format: Expected exactly 3 probabilities per row.")
         dosage = 2 * gp_probs[:, 0] + gp_probs[:, 1]
+        scores = beta * (dosage if effect_allele == ref else 2 - dosage)
     else:
         raise ValueError(
             f"Invalid mode '{mode}' or missing column '{mode}' in geno_col_map.")
 
-    scores = beta * (dosage if effect_allele == ref else 2 - dosage)
     scores[np.isnan(scores)] = 0
     print(f"variant_row: {variant_row}, scores: {scores}, geno_df: {geno_df}")
     return pd.DataFrame({var: scores}, index=geno_df.columns[9:])
