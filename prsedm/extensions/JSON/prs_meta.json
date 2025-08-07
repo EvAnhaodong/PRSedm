@@ -1,4 +1,10 @@
 {
+    "EC_prs": {
+        "method": "additive",
+        "db_table": "EC_prs",
+        "min": 0,
+        "max": 10.0
+    },
     "t2d-mahajan22-ma": {
         "method": "additive",
         "db_table": "t2d_mahajan22_ma",
